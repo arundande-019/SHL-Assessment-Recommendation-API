@@ -1,39 +1,47 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 import pandas as pd
+import numpy as np
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
-import numpy as np
 
 app = FastAPI()
 
 # Load dataset
-df = pd.read_excel("Gen_AI Dataset.xlsx")
-grouped_df = df.groupby("Query")["Assessment_url"].apply(list).reset_index()
+file_path = "Gen_AI Dataset.xlsx"
+train_df = pd.read_excel(file_path, sheet_name="Train-Set")
 
-# Load embedding model
+# Load model
 model = SentenceTransformer("all-MiniLM-L6-v2")
-query_embeddings = model.encode(grouped_df["Query"].tolist())
+
+# Create embeddings
+train_queries = train_df["Query"].tolist()
+train_embeddings = model.encode(train_queries)
 
 class QueryInput(BaseModel):
     query: str
 
-def recommend_assessments(user_query, top_k=3):
-    user_embedding = model.encode([user_query])
-    similarities = cosine_similarity(user_embedding, query_embeddings)
-    top_indices = np.argsort(similarities[0])[-top_k:][::-1]
-
-    recommended_urls = []
-    for idx in top_indices:
-        recommended_urls.extend(grouped_df.iloc[idx]["Assessment_url"])
-
-    return list(set(recommended_urls))[:5]
-
-@app.get("/")
-def home():
-    return {"message": "SHL Recommendation API Running"}
+@app.get("/health")
+def health_check():
+    return {"status": "healthy"}
 
 @app.post("/recommend")
-def recommend(input: QueryInput):
-    results = recommend_assessments(input.query)
+def recommend_assessments(input: QueryInput):
+    query_embedding = model.encode([input.query])
+    similarities = cosine_similarity(query_embedding, train_embeddings)
+    top_indices = np.argsort(similarities[0])[-5:][::-1]
+
+    results = []
+
+    for idx in top_indices:
+        results.append({
+            "url": train_df.iloc[idx]["Assessment_url"],
+            "name": "Assessment",
+            "adaptive_support": "No",
+            "description": "Recommended assessment",
+            "duration": 0,
+            "remote_support": "Yes",
+            "test_type": ["General"]
+        })
+
     return {"recommended_assessments": results}
